@@ -207,7 +207,7 @@ def check_database() -> list[Check]:
 
 
 def check_channels() -> list[Check]:
-    """Telegram and WhatsApp, only as far as their configuration goes."""
+    """Telegram and WhatsApp, each checked against its own API as far as it answers."""
     out: list[Check] = []
     token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     if not token:
@@ -221,11 +221,16 @@ def check_channels() -> list[Check]:
         if not (os.getenv("AGRONAUT_ALLOWED_IDS") or "").strip():
             out.append(Check(WARN, "AGRONAUT_ALLOWED_IDS is empty",
                              "anyone who finds the bot can talk to it"))
-    if not (os.getenv("WHATSAPP_TOKEN") or "").strip():
+    wa_token = (os.getenv("WHATSAPP_TOKEN") or "").strip()
+    if not wa_token:
         out.append(Check(SKIP, "WhatsApp not configured", "no WHATSAPP_TOKEN"))
     else:
-        out.append(Check(OK, "WhatsApp is configured",
-                         "run `agronaut whatsapp --check` for the full chain"))
+        # The same live check Telegram gets, because "a token is set" and "the token works"
+        # are different claims and this command exists to make the second one.
+        from .whatsapp_doctor import check_token
+
+        found = check_token(wa_token)
+        out.append(Check(found.status, f"WhatsApp: {found.label}", found.detail, found.fix))
     return out
 
 

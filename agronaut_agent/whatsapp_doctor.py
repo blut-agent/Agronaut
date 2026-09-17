@@ -31,6 +31,11 @@ TIMEOUT = 20
 OK, WARN, FAIL = "ok", "warn", "fail"
 _MARK = {OK: "OK  ", WARN: "WARN", FAIL: "FAIL"}
 
+# Meta's API Setup token expires 24 h after it is generated, and the dashboard stops saying
+# so the moment it is copied. Both `whatsapp --check` and `agronaut doctor` point the user
+# at it, so the sentence is written once.
+TOKEN_FIX = "the API Setup token expires in 24 h — generate a new one"
+
 
 @dataclass
 class Check:
@@ -70,6 +75,38 @@ def _err(body: dict) -> str:
     return f"({code}) {msg}" if code else msg
 
 
+def _probe(token: str, phone_id: str = ""):
+    """Ask the Graph API about this token.
+
+    The Graph API answers about an object, not about a token, so one has to be named:
+    the phone-number node when `WHATSAPP_PHONE_NUMBER_ID` is configured, the token's own
+    identity when it is not. A dead token is rejected on either.
+    """
+    target = f"{phone_id}?fields=display_phone_number,verified_name" if phone_id else "me"
+    return _get(f"{GRAPH}/{target}", token)
+
+
+def check_token(token: str) -> Check:
+    """Verify one token against the Graph API, on its own.
+
+    `run_checks` walks the whole chain and needs a phone id and a WABA before it can start;
+    `agronaut doctor` only needs to know whether the token it just called "configured" is
+    alive. The difference between the last two outcomes is the point: an answer from Meta is
+    a measurement, and not reaching Meta is not one.
+    """
+    status, body = _probe(token, (os.getenv("WHATSAPP_PHONE_NUMBER_ID") or "").strip())
+    if status == 0:
+        return Check(WARN, "configured, not verified — the Graph API was not reachable",
+                     f"could not reach the Graph API: {_err(body)}",
+                     "check the network, then `agronaut whatsapp --check`")
+    if status != 200:
+        return Check(FAIL, "token rejected by the Graph API", _err(body), TOKEN_FIX)
+    name, number = body.get("verified_name"), body.get("display_phone_number")
+    if name or number:
+        return Check(OK, f"token valid — {name or '?'} {number or '?'}")
+    return Check(OK, "token valid")
+
+
 def run_checks(*, subscribe: bool = False, public_url: str | None = None) -> list[Check]:
     """Check the chain in dependency order. `subscribe` repairs the WABA subscription."""
     out: list[Check] = []
@@ -88,10 +125,9 @@ def run_checks(*, subscribe: bool = False, public_url: str | None = None) -> lis
         return out
 
     # 1. The token, and the number it belongs to. Everything below depends on this.
-    status, body = _get(f"{GRAPH}/{phone_id}?fields=display_phone_number,verified_name", token)
+    status, body = _probe(token, phone_id)
     if status != 200:
-        out.append(Check(FAIL, "token rejected by the Graph API", _err(body),
-                         "the API Setup token expires in 24 h — generate a new one"))
+        out.append(Check(FAIL, "token rejected by the Graph API", _err(body), TOKEN_FIX))
         return out
     number = body.get("display_phone_number", "?")
     out.append(Check(OK, f"token valid — {body.get('verified_name','?')} {number}"))

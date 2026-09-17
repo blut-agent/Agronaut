@@ -114,6 +114,92 @@ def test_a_present_corpus_passes(monkeypatch, tmp_path):
     assert D.check_knowledge()[0].status == OK
 
 
+# --- channels: "configured" and "working" are different words ---------------------------------
+
+def _only_whatsapp(monkeypatch):
+    """Leave the Telegram branch out of it, so a test never needs that network either."""
+    for var in ("TELEGRAM_BOT_TOKEN", "AGRONAUT_ALLOWED_IDS"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WHATSAPP_TOKEN", "EAAG-test-token")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "1234567890")
+
+
+def _graph_answers(monkeypatch, status: int, body: dict):
+    """Stand in for the Graph API. The issue asks for this specifically: the three outcomes
+    are one function's return value, and dressing them up as a live call would test the
+    network instead."""
+    from agronaut_agent import whatsapp_doctor as W
+
+    monkeypatch.setattr(W, "_get", lambda url, token, method="GET": (status, body))
+
+
+def _whatsapp_line(checks):
+    return next(c for c in checks if c.label.startswith("WhatsApp"))
+
+
+def test_a_live_whatsapp_token_is_verified_rather_than_assumed(monkeypatch):
+    _only_whatsapp(monkeypatch)
+    _graph_answers(monkeypatch, 200, {"display_phone_number": "15551234567",
+                                      "verified_name": "Agronaut Test"})
+    line = _whatsapp_line(D.check_channels())
+    assert line.status == OK, line.render()
+    assert "Agronaut Test" in line.label and "15551234567" in line.label
+
+
+def test_an_expired_whatsapp_token_is_a_failure_not_an_ok(monkeypatch):
+    """The install this came from: the token expired on 08-Sep and `doctor` reported
+    "WhatsApp is configured" for the nine days after, while the channel was dead."""
+    _only_whatsapp(monkeypatch)
+    _graph_answers(monkeypatch, 400, {"error": {
+        "code": 190, "message": "Session has expired on Tuesday, 08-Sep-26 00:00:00 PDT"}})
+    line = _whatsapp_line(D.check_channels())
+    assert line.status == FAIL, line.render()
+    assert "190" in line.detail, "the Graph error code is the diagnosable part"
+    assert "24 h" in line.fix, "the fix has to name the usual cause"
+
+
+def test_an_unreachable_graph_api_is_not_reported_as_working(monkeypatch):
+    """Nothing was measured, so nothing may be claimed. `_get` reports a network failure as
+    status 0 with the reason in the body, which is not the same finding as a rejection."""
+    _only_whatsapp(monkeypatch)
+    _graph_answers(monkeypatch, 0, {"error": {"message": "urlopen error timed out"}})
+    line = _whatsapp_line(D.check_channels())
+    assert line.status == WARN, line.render()
+    assert "not verified" in line.label
+    assert "timed out" in line.detail, "what could not be checked belongs on the line"
+
+
+def test_no_whatsapp_token_still_reports_a_skip(monkeypatch):
+    """Unchanged, and worth pinning: absent is not the same finding as dead."""
+    for var in ("TELEGRAM_BOT_TOKEN", "AGRONAUT_ALLOWED_IDS"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("WHATSAPP_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID", raising=False)
+    line = _whatsapp_line(D.check_channels())
+    assert line.status == D.SKIP
+    assert "not configured" in line.label
+
+
+def test_the_token_check_names_the_phone_node_only_when_it_knows_it(monkeypatch):
+    """`doctor` is run on installs where the phone id is set and installs where it is not;
+    the check has to work in both, so the URL it probes depends on what is configured."""
+    from agronaut_agent import whatsapp_doctor as W
+
+    seen = []
+
+    def _capture(url, token, method="GET"):
+        seen.append(url)
+        return 200, {"verified_name": "Agronaut Test", "display_phone_number": "15551234567"}
+
+    monkeypatch.setattr(W, "_get", _capture)
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "1234567890")
+    assert W.check_token("t").status == OK
+    monkeypatch.delenv("WHATSAPP_PHONE_NUMBER_ID", raising=False)
+    assert W.check_token("t").status == OK
+    assert "1234567890" in seen[0]
+    assert seen[1].endswith("/me"), seen[1]
+
+
 # --- the report contract -------------------------------------------------------------------
 
 def test_exit_code_is_nonzero_only_when_something_failed():
