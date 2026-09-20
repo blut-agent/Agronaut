@@ -33,6 +33,38 @@ WATER_EXCHANGE_FRACTION = 0.20   # leaves with purge / overflow water
 DENITRIFICATION_FRACTION = 0.05  # anoxic loss
 
 
+def solids_production_kg_per_day(
+    feed_g_per_day: float,
+) -> float:
+    r"""Estimate daily fecal solids production from feed rate.
+
+    Uses the cited SOLIDS_PRODUCTION_FRACTION coefficient (g solids / g feed).
+    This is the production side: how much solids the fish produce regardless of
+    what the system captures. Slice 2 adds the capture side (how much is removed
+    by settling, swirl, drum filter, etc.).
+
+    Parameters
+    ----------
+    feed_g_per_day : float
+        Total feed supplied per day (as-fed, grams).
+
+    Returns
+    -------
+    float
+        Estimated daily solids production in kilograms.
+
+    References
+    ----------
+    FAO589 -- Somerville, Cohen, Pantanella, Stankus & Lovatelli (2014),
+    "Small-scale aquaponic food production", FAO Technical Paper 589.
+    General aquaculture literature gives 20-40 percent of feed DM as feces;
+    30 percent is a reasonable midpoint for standard pelleted feed.
+    """
+    frac = C.SOLIDS_PRODUCTION_FRACTION.value
+    # frac is g solids / g feed -> feed_g * frac = g solids -> / 1000 = kg
+    return feed_g_per_day * frac / 1000.0
+
+
 def nitrogen_check(
     feed_g_per_day: float,
     species: FishSpecies,

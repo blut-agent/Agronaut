@@ -68,3 +68,30 @@ def test_water_balance_makeup_is_positive_and_excludes_uncaptured_rain():
     w = mb.water_balance(grow_area_m2=10.0, tank_surface_m2=2.0)
     assert w["makeup_water_lpd"] > 0
     assert w["rainfall_lpd"] == 0.0  # covered system default
+
+
+def test_solids_production_scales_linearly_with_feed():
+    """Solids production should scale linearly with feed rate."""
+    r1 = mb.solids_production_kg_per_day(200.0)
+    r2 = mb.solids_production_kg_per_day(600.0)
+    r3 = mb.solids_production_kg_per_day(1000.0)
+    assert r2 == pytest.approx(r1 * 3, abs=0.001)
+    assert r3 == pytest.approx(r1 * 5, abs=0.001)
+
+
+def test_solids_production_uses_cited_coefficient():
+    """Production should use the coefficient value (0.30 g/g by default)."""
+    result = mb.solids_production_kg_per_day(1000.0)
+    expected = 1000.0 * C.SOLIDS_PRODUCTION_FRACTION.value / 1000.0
+    assert result == pytest.approx(expected, abs=0.001)
+
+
+def test_solids_production_positive_for_nonzero_feed():
+    """Production should be positive for any positive feed rate."""
+    assert mb.solids_production_kg_per_day(10.0) > 0
+    assert mb.solids_production_kg_per_day(100.0) > 0
+
+
+def test_solids_production_zero_for_zero_feed():
+    """Zero feed should produce zero solids."""
+    assert mb.solids_production_kg_per_day(0.0) == 0.0

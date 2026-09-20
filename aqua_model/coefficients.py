@@ -23,6 +23,7 @@ Primary sources:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,61 @@ NITRIFICATION_RATE = Coefficient(
     value=0.40, low=0.20, high=0.80, unit="g TAN / m2 media / day", source="LIT",
     note="Conservative. Tank/raft surfaces also nitrify but are NOT counted here (eng decision).",
 )
+
+# --- Solids production & capture (Slice 1: daily solids from feed; Slice 2: capture choices).
+# Fraction of as-fed feed that leaves the fish as fecal solids (the rest is assimilated/metabolised).
+# Ranges from ~20 % for low-fibre feeds up to ~40 % for high-fibre feeds; 0.30 is a reasonable
+# midpoint for standard aquaculture pelleted feed (Somerville et al. 2014, FAO589; general LIT).
+SOLIDS_PRODUCTION_FRACTION = Coefficient(
+    name="solids_production_fraction",
+    value=0.30, low=0.20, high=0.40, unit="g solids / g feed", source="FAO589",
+    note="Fecal solids as a fraction of as-fed feed; species, feed type, and fibre content shift this. Calibrate.",
+)
+
+
+# --- Solids capture options (Slice 1: add the structure; Slice 2: wire into sizing).
+class SolidsCaptureOption(NamedTuple):
+    """One solids-capture choice with its cited efficiency range."""
+
+    name: str                # human label: "none", "settling", "swirl", "drum"
+    value: float             # default capture fraction (midpoint)
+    low: float               # plausible lower bound
+    high: float              # plausible upper bound
+    source: str              # citation key (FAO589, LIT, etc.)
+    note: str = ""           # additional context
+
+
+# Capture fractions for common solids-handling choices. Ranges from FAO589 and RAS literature.
+# A system with no solids capture still produces feces; they just leave with the water.
+SOLIDS_CAPTURE_OPTIONS: dict[str, SolidsCaptureOption] = {
+    "none": SolidsCaptureOption(
+        name="none", value=0.0, low=0.0, high=0.0, source="LIT",
+        note="No capture — solids leave with effluent water.",
+    ),
+    "settling": SolidsCaptureOption(
+        name="settling", value=0.30, low=0.20, high=0.40, source="FAO589",
+        note="Horizontal settling basin / sedimentation tank; depends on detention time and flow uniformity.",
+    ),
+    "swirl": SolidsCaptureOption(
+        name="swirl", value=0.60, low=0.50, high=0.70, source="LIT",
+        note="Swirl (hydrocyclone) separator; more efficient than gravity settling for larger particles.",
+    ),
+    "drum": SolidsCaptureOption(
+        name="drum", value=0.90, low=0.80, high=0.95, source="LIT",
+        note="Rotating drum filter (microscreen); highest capture but adds cost and maintenance.",
+    ),
+}
+
+
+def default_solids_capture() -> str:
+    """Return the name of the default solids-handling choice for backward compatibility.
+
+    The existing constant SOLIDS_REMOVAL_FRACTION = 0.35 is preserved; this defaults
+    to "settling" (0.30 capture) so existing designs behave the same as before.
+    Slice 2 makes the choice explicit in the sizing input.
+    """
+    return "settling"
+
 
 # --- Hydroponics: nutrient-solution targets (no fish; salts dosed directly). ------------
 # Target electrical conductivity (EC) of the nutrient solution, a standard proxy for total
